@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import isaacgym
 from legged_gym.envs import *
-from legged_gym.utils import get_args, task_registry, update_class_from_dict, export_policy_as_jit
+from legged_gym.utils import get_args, task_registry, update_class_from_dict
 from isaacgym import gymapi
 import numpy as np
 import torch
