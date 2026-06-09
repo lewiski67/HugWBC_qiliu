@@ -110,7 +110,8 @@ def play(args):
         print(f"Recording video to: {video_path}")
 
     look_at = np.array(env.root_states[0, :3].cpu(), dtype=np.float64)
-    env.set_camera(look_at + camera_relative_position, look_at, track_index)
+    if env.viewer is not None:
+        env.set_camera(look_at + camera_relative_position, look_at, track_index)
     _set_camera(env.gym, env.envs[0], camera_handle, look_at + camera_relative_position, look_at)
     
     _, _ = env.reset()
@@ -131,7 +132,8 @@ def play(args):
                 camera_relative_position = 2 * \
                     np.array([np.cos(camera_rot) * h_scale,
                              np.sin(camera_rot) * h_scale, 0.5 * v_scale])
-                env.set_camera(look_at + camera_relative_position, look_at, track_index)
+                if env.viewer is not None:
+                    env.set_camera(look_at + camera_relative_position, look_at, track_index)
                 _set_camera(env.gym, env.envs[0], camera_handle, look_at + camera_relative_position, look_at)
 
                 if video_writer is not None and timestep % args.record_interval == 0:
