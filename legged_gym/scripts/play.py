@@ -6,12 +6,38 @@ import isaacgym
 from legged_gym.envs import *
 from legged_gym.utils import get_args, task_registry, update_class_from_dict
 from isaacgym import gymapi
+from datetime import datetime
+import imageio.v2 as imageio
 import numpy as np
 import torch
 import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import yaml
 from isaacgym import gymapi
+
+def _make_video_path(args):
+    os.makedirs(args.video_dir, exist_ok=True)
+    if args.video_name:
+        video_name = args.video_name
+    else:
+        checkpoint = "latest" if args.checkpoint is None else str(args.checkpoint)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        video_name = f"{args.task}_model_{checkpoint}_{timestamp}.mp4"
+    if not video_name.endswith(".mp4"):
+        video_name += ".mp4"
+    return os.path.join(args.video_dir, video_name)
+
+def _set_camera(gym, sim_env, camera_handle, camera_position, camera_target):
+    position = gymapi.Vec3(*camera_position.tolist())
+    target = gymapi.Vec3(*camera_target.tolist())
+    if camera_handle is not None:
+        gym.set_camera_location(camera_handle, sim_env, position, target)
+
+def _record_frame(env, camera_handle, video_writer, width, height):
+    env.gym.render_all_camera_sensors(env.sim)
+    frame = env.gym.get_camera_image(env.sim, env.envs[0], camera_handle, gymapi.IMAGE_COLOR)
+    frame = np.reshape(frame, (height, width, 4))[:, :, :3]
+    video_writer.append_data(frame)
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
@@ -69,46 +95,67 @@ def play(args):
     camera_rot_per_sec = 1 * np.pi / 10
     camera_relative_position = np.array([1, 0, 0.8])
     track_index = 0
+    camera_handle = None
+    video_writer = None
+
+    if args.record_video:
+        camera_props = gymapi.CameraProperties()
+        camera_props.width = args.video_width
+        camera_props.height = args.video_height
+        camera_props.enable_tensors = False
+        camera_handle = env.gym.create_camera_sensor(env.envs[0], camera_props)
+        video_path = _make_video_path(args)
+        video_writer = imageio.get_writer(video_path, fps=args.video_fps)
+        print(f"Recording video to: {video_path}")
 
     look_at = np.array(env.root_states[0, :3].cpu(), dtype=np.float64)
     env.set_camera(look_at + camera_relative_position, look_at, track_index)
+    _set_camera(env.gym, env.envs[0], camera_handle, look_at + camera_relative_position, look_at)
     
     _, _ = env.reset()
     obs, critic_obs, _, _, _ = env.step(torch.zeros(
             env.num_envs, env.num_actions, dtype=torch.float, device=env.device))
 
-    timesteps = env_cfg.env.episode_length_s * 500 + 1
-    for timestep in tqdm.tqdm(range(timesteps)):
-        with torch.inference_mode():
-            actions, _ = policy.act_inference(obs, privileged_obs=critic_obs)
+    timesteps = args.num_steps if args.num_steps is not None else env_cfg.env.episode_length_s * 500 + 1
+    try:
+        for timestep in tqdm.tqdm(range(timesteps)):
+            with torch.inference_mode():
+                actions, _ = policy.act_inference(obs, privileged_obs=critic_obs)
 
-            obs, critic_obs, _, _, _ = env.step(actions)
-            look_at = np.array(env.root_states[track_index, :3].cpu(), dtype=np.float64)
-            camera_rot = (camera_rot + camera_rot_per_sec * env.dt) % (2 * np.pi)
-            h_scale = 1
-            v_scale = 0.8
-            camera_relative_position = 2 * \
-                np.array([np.cos(camera_rot) * h_scale,
-                         np.sin(camera_rot) * h_scale, 0.5 * v_scale])
-            env.set_camera(look_at + camera_relative_position, look_at, track_index)
+                obs, critic_obs, _, _, _ = env.step(actions)
+                look_at = np.array(env.root_states[track_index, :3].cpu(), dtype=np.float64)
+                camera_rot = (camera_rot + camera_rot_per_sec * env.dt) % (2 * np.pi)
+                h_scale = 1
+                v_scale = 0.8
+                camera_relative_position = 2 * \
+                    np.array([np.cos(camera_rot) * h_scale,
+                             np.sin(camera_rot) * h_scale, 0.5 * v_scale])
+                env.set_camera(look_at + camera_relative_position, look_at, track_index)
+                _set_camera(env.gym, env.envs[0], camera_handle, look_at + camera_relative_position, look_at)
 
-            env.commands[:, 0] = 2.0
-            env.commands[:, 1] = 0
-            env.commands[:, 2] = 0
-            env.commands[:, 3] = 2.0
-            env.commands[:, 4] = 0.5
-            env.commands[:, 5] = 0.5
-            env.commands[:, 6] = 0.2
-            env.commands[:, 7] = -0.0
-            env.commands[:, 8] = 0.0
-            env.commands[:, 9] = 0.0
-            env.use_disturb = True
-            env.disturb_masks[:] = True
-            env.disturb_isnoise[:]= True
-            env.disturb_rad_curriculum[:] = 1.0
-            env.interrupt_mask[:] = env.disturb_masks[:]
-            env.standing_envs_mask[:] = True
-            env.commands[env.standing_envs_mask, :3] = 0
+                if video_writer is not None and timestep % args.record_interval == 0:
+                    _record_frame(env, camera_handle, video_writer, args.video_width, args.video_height)
+
+                env.commands[:, 0] = 2.0
+                env.commands[:, 1] = 0
+                env.commands[:, 2] = 0
+                env.commands[:, 3] = 2.0
+                env.commands[:, 4] = 0.5
+                env.commands[:, 5] = 0.5
+                env.commands[:, 6] = 0.2
+                env.commands[:, 7] = -0.0
+                env.commands[:, 8] = 0.0
+                env.commands[:, 9] = 0.0
+                env.use_disturb = True
+                env.disturb_masks[:] = True
+                env.disturb_isnoise[:]= True
+                env.disturb_rad_curriculum[:] = 1.0
+                env.interrupt_mask[:] = env.disturb_masks[:]
+                env.standing_envs_mask[:] = True
+                env.commands[env.standing_envs_mask, :3] = 0
+    finally:
+        if video_writer is not None:
+            video_writer.close()
 
 if __name__ == '__main__':
     args = get_args()
