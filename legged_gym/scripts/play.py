@@ -8,6 +8,9 @@ from legged_gym.utils import get_args, task_registry, update_class_from_dict
 from isaacgym import gymapi
 from datetime import datetime
 import imageio.v2 as imageio
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
@@ -39,6 +42,38 @@ def _record_frame(env, camera_handle, video_writer, width, height):
     frame = np.reshape(frame, (height, width, 4))[:, :, :3]
     video_writer.append_data(frame)
 
+def _make_state_renderer(width, height):
+    dpi = 100
+    fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi)
+    ax = fig.add_subplot(111, projection="3d")
+    return fig, ax
+
+def _record_state_frame(env, renderer, video_writer):
+    fig, ax = renderer
+    body_pos = env.rigid_body_states[0, :, :3].detach().cpu().numpy()
+    root_pos = env.root_states[0, :3].detach().cpu().numpy()
+
+    ax.clear()
+    ax.scatter(body_pos[:, 0], body_pos[:, 1], body_pos[:, 2], c="tab:blue", s=18)
+    for pos in body_pos:
+        ax.plot([root_pos[0], pos[0]], [root_pos[1], pos[1]], [root_pos[2], pos[2]], c="0.55", linewidth=0.8)
+    ax.scatter([root_pos[0]], [root_pos[1]], [root_pos[2]], c="tab:red", s=36)
+
+    ax.set_xlim(root_pos[0] - 1.5, root_pos[0] + 1.5)
+    ax.set_ylim(root_pos[1] - 1.5, root_pos[1] + 1.5)
+    ax.set_zlim(0.0, 2.0)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+    ax.view_init(elev=18, azim=-60)
+    ax.set_title("H1 policy state trace")
+    fig.tight_layout()
+    fig.canvas.draw()
+
+    width, height = fig.canvas.get_width_height()
+    frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
+    video_writer.append_data(frame)
+
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     resume_path = train_cfg.runner.resume_path
@@ -47,7 +82,7 @@ def play(args):
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 1)
     env_cfg.env.episode_length_s = 100000
-    env_cfg.viewer.record_video = args.record_video
+    env_cfg.viewer.record_video = False
     env_cfg.viewer.video_width = args.video_width
     env_cfg.viewer.video_height = args.video_height
 
@@ -100,13 +135,12 @@ def play(args):
     track_index = 0
     camera_handle = None
     video_writer = None
+    state_renderer = None
 
     if args.record_video:
-        camera_handle = getattr(env, "recording_camera_handle", None)
-        if camera_handle is None:
-            raise RuntimeError("Recording camera was not created by the environment.")
         video_path = _make_video_path(args)
         video_writer = imageio.get_writer(video_path, fps=args.video_fps)
+        state_renderer = _make_state_renderer(args.video_width, args.video_height)
         print(f"Recording video to: {video_path}")
 
     look_at = np.array(env.root_states[0, :3].cpu(), dtype=np.float64)
@@ -137,7 +171,7 @@ def play(args):
                 _set_camera(env.gym, env.envs[0], camera_handle, look_at + camera_relative_position, look_at)
 
                 if video_writer is not None and timestep % args.record_interval == 0:
-                    _record_frame(env, camera_handle, video_writer, args.video_width, args.video_height)
+                    _record_state_frame(env, state_renderer, video_writer)
 
                 env.commands[:, 0] = 2.0
                 env.commands[:, 1] = 0
@@ -159,6 +193,8 @@ def play(args):
     finally:
         if video_writer is not None:
             video_writer.close()
+        if state_renderer is not None:
+            plt.close(state_renderer[0])
 
 if __name__ == '__main__':
     args = get_args()

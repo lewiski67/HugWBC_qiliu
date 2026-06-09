@@ -136,7 +136,7 @@ def get_args():
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
         {"name": "--sim_joystick", "action": "store_true", "default":False, "help": "Sample commands from sim joystick"},
         {"name": "--num_steps", "type": int, "help": "Number of simulation steps to run in play mode."},
-        {"name": "--record_video", "action": "store_true", "default": False, "help": "Record play-mode camera frames to an mp4 file."},
+        {"name": "--record_video", "action": "store_true", "default": False, "help": "Record play-mode body-state visualization to an mp4 file."},
         {"name": "--video_dir", "type": str, "default": "eval_videos", "help": "Directory for recorded play-mode videos."},
         {"name": "--video_name", "type": str, "help": "Recorded video file name. Defaults to task/checkpoint/timestamp."},
         {"name": "--video_width", "type": int, "default": 1280, "help": "Recorded video width."},
@@ -155,4 +155,3 @@ def get_args():
     if args.sim_device=='cuda':
         args.sim_device += f":{args.sim_device_id}"
     return args
-
