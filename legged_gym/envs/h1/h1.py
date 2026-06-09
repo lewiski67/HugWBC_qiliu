@@ -1358,6 +1358,7 @@ class H1Robot(BaseTask):
         env_upper = gymapi.Vec3(0., 0., 0.)
         self.actor_handles = []
         self.envs = []
+        self.recording_camera_handle = None
         for i in range(self.num_envs):
             # create env instance
             env_handle = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs)))
@@ -1373,6 +1374,12 @@ class H1Robot(BaseTask):
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
             body_props = self._process_rigid_body_props(body_props, i)
             self.gym.set_actor_rigid_body_properties(env_handle, actor_handle, body_props, recomputeInertia=True)
+            if i == 0 and getattr(self.cfg.viewer, "record_video", False):
+                camera_props = gymapi.CameraProperties()
+                camera_props.width = getattr(self.cfg.viewer, "video_width", 1280)
+                camera_props.height = getattr(self.cfg.viewer, "video_height", 720)
+                camera_props.enable_tensors = False
+                self.recording_camera_handle = self.gym.create_camera_sensor(env_handle, camera_props)
             self.envs.append(env_handle)
             self.actor_handles.append(actor_handle)
 

@@ -47,6 +47,9 @@ def play(args):
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 1)
     env_cfg.env.episode_length_s = 100000
+    env_cfg.viewer.record_video = args.record_video
+    env_cfg.viewer.video_width = args.video_width
+    env_cfg.viewer.video_height = args.video_height
 
     env_cfg.terrain.curriculum = False
     env_cfg.noise.add_noise = True
@@ -99,11 +102,9 @@ def play(args):
     video_writer = None
 
     if args.record_video:
-        camera_props = gymapi.CameraProperties()
-        camera_props.width = args.video_width
-        camera_props.height = args.video_height
-        camera_props.enable_tensors = False
-        camera_handle = env.gym.create_camera_sensor(env.envs[0], camera_props)
+        camera_handle = getattr(env, "recording_camera_handle", None)
+        if camera_handle is None:
+            raise RuntimeError("Recording camera was not created by the environment.")
         video_path = _make_video_path(args)
         video_writer = imageio.get_writer(video_path, fps=args.video_fps)
         print(f"Recording video to: {video_path}")
